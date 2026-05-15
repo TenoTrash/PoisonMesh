@@ -2,8 +2,7 @@
 
 Herramienta de pentesting para redes **Meshtastic**, diseñada para el **M5Stack Cardputer ADV** con el modulo **Cap LoRa-1262 (SX1262)**.
 
-> ?? **ADVERTENCIA LEGAL**: Esta herramienta es exclusivamente para
-> pentesting en redes propias o con autorización explicita del propietario.
+**ADVERTENCIA LEGAL**: Esta herramienta es exclusivamente para pentesting en redes propias o con autorización explicita del propietario.
 > Originalmente pensado para responsible disclosure ante los developers de Meshtastic...
 
 ---
