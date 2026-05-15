@@ -66,6 +66,6 @@ Herramienta de pentesting para redes **Meshtastic**, diseñada para el **M5Stack
 ## Créditos
 
 - Investigacion y desarrollo: **Teno**
-- Referencias: meshtastic/firmware, CVE-2025-55293, CVE-2024-51500
+- Referencias: meshtastic firmware, CVE-2025-55293, CVE-2024-51500
 
 
