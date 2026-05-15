@@ -54,10 +54,10 @@ Herramienta de pentesting para redes **Meshtastic**, diseñada para el **M5Stack
 
 | Tecla | Accion |
 |---|---|
-| `;` | ? Subir |
-| `.` | ? Bajar |
-| `,` | ? Valor anterior |
-| `/` | ? Valor siguiente |
+| `;` |  Subir |
+| `.` |  Bajar |
+| `,` |  Valor anterior |
+| `/` |  Valor siguiente |
 | `Enter` | Confirmar |
 | `` ` `` | Escape / Salir |
 
