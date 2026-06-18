@@ -26,7 +26,6 @@ Cada nodo generado usa un modelo de hardware distinto (TBEAM, HELTEC, RAK4631, e
 
 ### Impacto observable
 - La lista de nodos en la app Meshtastic crece con decenas o cientos de entradas en segundos
-- El mapa se llena de pines en ubicaciones aleatorias del mundo
 - Los nodos reales quedan enterrados entre el ruido
 
 ### Parametros configurables
