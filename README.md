@@ -31,7 +31,7 @@ Herramienta de pentesting para redes **Meshtastic**, diseñada para el **M5Stack
 | Unidad principal | M5Stack Cardputer ADV (ESP32-S3) |
 | Modulo LoRa | Cap LoRa-1262 (SX1262, 850-960 MHz) |
 
-### Pines SD (rockyou.txt opcional)
+### Pines SD
 | Senal | GPIO |
 |---|---|
 | SCK | 40 |
