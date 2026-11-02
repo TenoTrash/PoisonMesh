@@ -26,6 +26,7 @@ Cada nodo generado usa un modelo de hardware distinto (TBEAM, HELTEC, RAK4631, e
 
 ### Impacto observable
 - La lista de nodos en la app Meshtastic crece con decenas o cientos de entradas en segundos
+- El mapa se llena de pines en ubicaciones aleatorias del mundo
 - Los nodos reales quedan enterrados entre el ruido
 
 ### Parametros configurables
@@ -144,19 +145,18 @@ El radio vuelve a RX despues de cada TX, permitiendo que el sniffer siga descubr
 Demostrar que cualquier nodo puede enviar mensajes de texto usando la identidad de otro participante de la red, sin posibilidad de verificación por parte del receptor.
 
 ### Como funciona
-El usuario selecciona un nodo víctima de la lista del sniffer y elige uno de los cuatro mensajes de prueba disponibles. PoisonMesh construye un paquete de texto plano (PORTNUM=1) con el node_id de la victima como `from` y el mensaje en el payload.
+El usuario selecciona un nodo víctima de la lista del sniffer y elige uno de los mensajes predefinidos, o escribe un mensaje personalizado con el editor de texto integrado. PoisonMesh construye un paquete de texto plano (PORTNUM=1) con el node_id de la victima como `from` y el mensaje en el payload.
 
-A diferencia de los otros ataques, Mesh Impersonator no usa un loop de repetición: envia el mensaje exactamente una vez y muestra el resultado. Esto es intencional para que la demostracion sea controlada y trazable.
+Adicionalmente se puede elegir cuantos mensajes enviar (default 1). Si se elige mas de uno, el firmware envia el mensaje en loop con un delay fijo entre envios. Cada mensaje se reconstruye con un `id` de paquete unico para evadir la deduplicacion por (from, id) que hacen los nodos Meshtastic (PacketHistory::wasSeenRecently).
 
 El payload de PORTNUM=1 es texto UTF-8 plano (sin protobuf), cifrado con la PSK del canal. El receptor descifra el texto y lo atribuye al nodo identificado por el campo `from` del header.
 
-### Mensajes disponibles
+### Mensajes predefinidos
 1. Técnico: "[TEST] PoisonMesh by Teno | Este mensaje es una prueba de seguridad"
 2. Demo: "[DEMO] Este mensaje fue enviado por PoisonMesh, NO por este nodo"
 3. CVE: "[CVE-DEMO] Meshtastic permite spoofing de mensajes | PoisonMesh by Teno"
 4. Impacto: "[POISONMESH] Spoofing activo | Este nodo fue suplantado | by Teno"
-
-Todos los mensajes incluyen identificacion explicita de la herramienta para que la demostracion sea trazable y no genere confusion en los participantes.
+5. Personalizado: mensaje arbitrario escrito por el usuario (hasta 199 caracteres)
 
 ### Impacto observable
 - El mensaje aparece en la app Meshtastic con el nombre, icono y node_id del nodo seleccionado como victima
@@ -164,7 +164,8 @@ Todos los mensajes incluyen identificacion explicita de la herramienta para que 
 
 ### Parametros configurables
 - Nodo victima (seleccionado de la lista del sniffer)
-- Mensaje (seleccionado de la lista de 4 opciones)
+- Mensaje (4 predefinidos + personalizado)
+- Cantidad de mensajes a enviar (default 1, hasta 100)
 
 ---
 
@@ -191,10 +192,65 @@ Adicionalmente, el cifrado punto a punto hacia ese nodo queda deshabilitado hast
 
 ---
 
+## 8. ChattyMesh
+
+### Objetivo
+Demostrar un ataque de suplantación continua e indistinguible: generar tráfico de mensajes de texto falsos, cada uno atribuido a un nodo aleatorio de la red, para buscar amplificación del ruido en el canal o degradar la trazabilidad de las comunicaciones.
+
+### Como funciona
+ChattyMesh es un ataque de toggle ON/OFF. Cuando esta activo, en cada ciclo selecciona aleatoriamente un nodo de la lista descubierta y genera un mensaje de texto con caracteres aleatorios y largo aleatorio (8-64 caracteres). Lo envia con el node_id del nodo elegido como `from`, de modo que los receptores lo atribuyen a un nodo real de la red.
+
+Entre mensaje y mensaje hay un delay aleatorio de entre 2 y 6 segundos, para que el patrón de tráfico no sea periódico y sea más difícil de detectar y filtrar.
+
+Cada mensaje se reconstruye desde cero con un `id` de paquete unico (Meshtastic deduplica por from+id), lo que garantiza que todos los mensajes sean procesados.
+
+### Impacto observable
+- La app Meshtastic muestra un flujo continuo de mensajes de texto aparentemente enviados por distintos nodos reales
+- El contenido es ruido aleatorio, dificultando distinguir mensajes legítimos
+- El canal se satura con tráfico que los nodos intermedios retransmiten
+
+### Parametros configurables
+- Toggle ON/OFF con Enter
+- Delay aleatorio entre mensajes (2-6 segundos, fijo para la demo)
+- Largo de mensaje aleatorio (8-64 caracteres)
+
+---
+
+## 9. GhostMesh
+
+### Objetivo
+Demostrar la persistencia de un nodo fantasma: crear una identidad falsa con nombre elegido por el atacante, mantenerla viva durante toda la sesion, y usarla repetidamente para enviar mensajes que los receptores atribuyen a un nodo que no existe físicamente.
+
+### Como funciona
+La primera vez que se entra al ataque, PoisonMesh genera un par de claves X25519 (Curve25519) de 32 bytes en RAM y deriva el `id` del nodo fantasma a partir de la clave publica: `id = crc32(public_key)`, exactamente igual que un nodo Meshtastic real con PKI. El hardware es aleatorio, y el nombre largo y corto se piden manualmente (con un nombre por defecto derivado del id, editable con el editor de texto). El nodo se crea y persiste durante toda la sesion de PoisonMesh.
+
+La clave privada se genera y se descarta (no se usa para cifrar nada en esta PoC). Todo el estado vive en RAM, por lo que al reiniciar PoisonMesh se regenera un nodo fantasma nuevo (id y clave distintos).
+
+A partir de ahi, el ataque ofrece las siguientes acciones en un menu compacto:
+1. Enviar mensaje: escribe un texto arbitrario y lo envia (una sola vez) con el `id` del nodo fantasma como `from`.
+2. Re-anunciar nodo: reenvia el NodeInfo (PORTNUM=4) del fantasma, incluyendo su clave publica, para que la red lo conozca/refresque su presencia. (El nodo no se anuncia automaticamente al crearse; la primera vez que la red lo ve es al enviar un mensaje o al usar esta opcion.)
+3. Volver: sale al menu principal sin perder el estado del fantasma.
+
+Todo el estado del fantasma (id, claves, nombres, hardware) se conserva aunque se salga al menu y se reentre al ataque, de modo que se pueden enviar mensajes desde el mismo nodo en cualquier momento.
+
+### Impacto observable
+- Aparece un nodo con el nombre elegido en la app Meshtastic, atribuido a un id que no tiene hardware real
+- El nodo fantasma presenta una clave publica X25519 valida, por lo que los clientes lo muestran con cifrado PKI disponible
+- Los mensajes enviados desde ese id son indistinguibles de los de un nodo legitimo
+- La identidad falsa permanece estable y reutilizable durante toda la sesion
+
+### Parametros configurables
+- Nombre largo (manual, hasta 23 caracteres)
+- Nombre corto (manual, hasta 4 caracteres)
+- Mensaje arbitrario (editor de texto)
+- Clave publica X25519 (autogenerada; no editable)
+
+---
+
 ## Sniffer pasivo (funcion de base)
 
 ### Objetivo
-No es un ataque en si mismo, sino la función que habilita todos los ataques dirigidos (Namechange, Position Poison, Mesh Move, Impersonator, PKI Poison).
+No es un ataque en si mismo, sino la función que habilita todos los ataques dirigidos (Namechange, Position Poison, Mesh Move, Impersonator, PKI Poison, ChattyMesh).
 
 ### Arquitectura interna del sniffer
 El radio SX1262 permanece en modo RX continuo mientras el menu principal esta visible. Cada paquete recibido es descifrado con la PSK del canal y parseado. Los campos `from`, `long_name`, `short_name`, `public_key`, `lat`, `lon` y `rssi` se almacenan en el NodeDB interno (hasta 32 nodos).
