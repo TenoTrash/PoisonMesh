@@ -8,10 +8,6 @@ Herramienta de pentesting para redes **Meshtastic**, diseñada para el **M5Stack
 
 ---
 
-## Por motivos obvios el código no se encuentra disponible hasta la fecha
-
----
-
 ## Ataques implementados
 
 | # | Nombre | Descripción |
