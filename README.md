@@ -8,6 +8,10 @@ Herramienta de pentesting para redes **Meshtastic**, diseñada para el **M5Stack
 
 ---
 
+## Por motivos obvios el código no se encuentra disponible hasta la fecha
+
+---
+
 ## Ataques implementados
 
 | # | Nombre | Descripción |
@@ -21,6 +25,7 @@ Herramienta de pentesting para redes **Meshtastic**, diseñada para el **M5Stack
 | 7 | PKI Poison | CVE-2025-55293: borrar la clave publica de un nodo |
 | 8 | ChattyMesh | Suplantacion continua de nodos aleatorios con mensajes de texto aleatorios (toggle ON/OFF, delay aleatorio 2-6s) |
 | 9 | GhostMesh | Nodo fantasma persistente (nombre manual + clave X25519 derivada del id) para suplantar mensajes durante toda la sesion |
+| 10 | NullMeshGrow | CVE-2026-42566: inyeccion de nodos con owner (`long_name`/`short_name`) malformado (bytes nulos, espacios y UTF-8 roto). Cada nodo genera su par X25519, envia NODEINFO x2 cada 5s y crea un nodo nuevo a los 15s (toggle ON/OFF) |
 
 ---
 

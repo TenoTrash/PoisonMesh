@@ -45,5 +45,5 @@
 #define COL_OK         0x07E0   // verde
 
 // ---- Version del firmware ----------------------------------
-#define FW_VERSION "1.5.4"
+#define FW_VERSION "1.5.5"
 #define APP_NAME   "PoisonMesh"
